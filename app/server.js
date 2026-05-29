@@ -222,6 +222,8 @@ async function processLegalizacion(data) {
       synced: false,
       remoteFolder: null,
       filesUploaded: 0,
+      consolidadoSynced: false,
+      consolidadoRemotePath: null,
       error: null,
     },
     alertEmail: {
@@ -255,6 +257,25 @@ async function processLegalizacion(data) {
   }
 
   appendConsolidadoRows(buildConsolidadoRows({ data, metadata }));
+
+  if (ONEDRIVE_ENABLED) {
+    try {
+      const remoteConsolidadoFilePath = oneDriveJoinPath(
+        ONEDRIVE_BASE_PATH,
+        '_consolidado',
+        path.basename(CONSOLIDADO_FILE),
+      );
+      const consolidadoUpload = await syncConsolidadoToOneDrive(remoteConsolidadoFilePath);
+      metadata.oneDrive.consolidadoSynced = true;
+      metadata.oneDrive.consolidadoRemotePath = remoteConsolidadoFilePath;
+      metadata.oneDrive.consolidadoBytes = consolidadoUpload.bytes;
+    } catch (error) {
+      metadata.oneDrive.consolidadoError = error.message || 'No se pudo sincronizar el consolidado en OneDrive';
+      if (ONEDRIVE_REQUIRED) {
+        throw new Error(`Legalización guardada, pero falló subida del consolidado a OneDrive: ${metadata.oneDrive.consolidadoError}`);
+      }
+    }
+  }
 
   if (ALERT_EMAIL_ENABLED) {
     try {
@@ -780,6 +801,23 @@ async function sendLegalizacionAlertEmail({ data, metadata }) {
     subject,
     text: textBody,
   });
+}
+
+async function syncConsolidadoToOneDrive(remoteFilePath) {
+  if (!fs.existsSync(CONSOLIDADO_FILE)) {
+    throw new Error(`No existe consolidado local: ${CONSOLIDADO_FILE}`);
+  }
+  const buffer = fs.readFileSync(CONSOLIDADO_FILE);
+  const sizeMb = buffer.length / (1024 * 1024);
+  if (sizeMb > ONEDRIVE_MAX_INLINE_MB) {
+    throw new Error(`Consolidado supera límite OneDrive simple (${sizeMb.toFixed(2)} MB)`);
+  }
+
+  await putOneDriveFile(remoteFilePath, buffer);
+  return {
+    remotePath: remoteFilePath,
+    bytes: buffer.length,
+  };
 }
 
 async function syncLocalFolderToOneDrive(localFolder, remoteFolder) {
