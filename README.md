@@ -4,7 +4,9 @@ Implementación web completa para:
 - diligenciar legalización virtual,
 - cargar soportes por gasto,
 - generar un archivo Excel basado en la plantilla oficial,
-- guardar todo por carpeta exacta de conductor (cédula obligatoria).
+- guardar todo por carpeta exacta de conductor (cédula obligatoria),
+- generar consolidado general en Excel,
+- enviar alerta por correo a contabilidad.
 
 ## Ruta web
 - `http://localhost:3000/legalizacion-caja-menor`
@@ -27,6 +29,10 @@ Dentro de cada radicado:
 - `LEGALIZACION_<radicado>.xlsx`
 - `metadata.json`
 
+Consolidado general:
+- `app/data/consolidado/CONSOLIDADO_LEGALIZACIONES.xlsx`
+- En Render: `/data/consolidado/CONSOLIDADO_LEGALIZACIONES.xlsx`
+
 ## Campo clave para exactitud
 - La cédula es obligatoria y la carpeta se crea con esa cédula como identificador principal.
 
@@ -46,6 +52,16 @@ Variables disponibles:
 - `ONEDRIVE_CLIENT_SECRET`
 - `ONEDRIVE_DRIVE_ID`
 - `ONEDRIVE_BASE_PATH` (por defecto `LegalizacionesCajaMenor`)
+- `ALERT_EMAIL_ENABLED` (`true|false`)
+- `ALERT_EMAIL_REQUIRED` (`true|false`) si quieres que falle el envío cuando no salga el correo
+- `ALERT_EMAIL_TO` (por defecto `contabilidad@engeikos.com.co`)
+- `ALERT_EMAIL_FROM`
+- `ALERT_EMAIL_SUBJECT_PREFIX` (por defecto `[Caja menor]`)
+- `SMTP_HOST` (ej: `smtp.office365.com`)
+- `SMTP_PORT` (ej: `587`)
+- `SMTP_SECURE` (`true|false`)
+- `SMTP_USER`
+- `SMTP_PASS`
 
 Ejemplo local:
 - `DATA_DIR="/tmp/legalizaciones" node app/server.js`

@@ -72,17 +72,18 @@ async function onSubmit() {
     cajaMenorInput.value = result.result.cabecera.cajaMenorNumero || cajaMenorInput.value;
 
     const msg = [
+      'Legalización enviada correctamente.',
       `Radicado: ${result.result.radicado}`,
       `Caja menor #: ${result.result.cabecera.cajaMenorNumero}`,
-      `Carpeta base: ${result.result.rutas.baseFolder}`,
-      `Excel generado: ${result.result.rutas.archivoExcel}`,
-      `Soportes guardados: ${result.result.cantidadSoportes}`,
+      `Gastos reportados: ${result.result.cantidadGastos}`,
+      `Soportes cargados: ${result.result.cantidadSoportes}`,
+      'Guarda tu radicado para seguimiento.',
     ].join('\n');
 
     let oneDriveMsg = '';
     const oneDrive = result.result.oneDrive;
     if (oneDrive?.enabled && oneDrive?.synced) {
-      oneDriveMsg = `\nOneDrive: sincronizado (${oneDrive.filesUploaded} archivos)\nRuta OneDrive: ${oneDrive.remoteFolder}`;
+      oneDriveMsg = `\nOneDrive: sincronizado (${oneDrive.filesUploaded} archivos).`;
     } else if (oneDrive?.enabled && oneDrive?.error) {
       oneDriveMsg = `\nOneDrive: error (${oneDrive.error})`;
     } else if (oneDrive?.enabled) {

@@ -6,6 +6,8 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const XLSX = require('xlsx');
+const nodemailer = require('nodemailer');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -14,6 +16,8 @@ const ROOT_DIR = process.cwd();
 const PUBLIC_DIR = path.join(ROOT_DIR, 'app', 'public');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT_DIR, 'app', 'data');
 const LEGALIZACIONES_DIR = path.join(DATA_DIR, 'legalizaciones');
+const CONSOLIDADO_DIR = path.join(DATA_DIR, 'consolidado');
+const CONSOLIDADO_FILE = path.join(CONSOLIDADO_DIR, 'CONSOLIDADO_LEGALIZACIONES.xlsx');
 const COUNTER_FILE = path.join(DATA_DIR, 'caja-menor-counter.json');
 const ONEDRIVE_ENABLED = isTruthy(process.env.ONEDRIVE_ENABLED);
 const ONEDRIVE_REQUIRED = isTruthy(process.env.ONEDRIVE_REQUIRED);
@@ -23,6 +27,16 @@ const ONEDRIVE_CLIENT_SECRET = optionalText(process.env.ONEDRIVE_CLIENT_SECRET);
 const ONEDRIVE_DRIVE_ID = optionalText(process.env.ONEDRIVE_DRIVE_ID);
 const ONEDRIVE_BASE_PATH = optionalText(process.env.ONEDRIVE_BASE_PATH) || 'LegalizacionesCajaMenor';
 const ONEDRIVE_MAX_INLINE_MB = 250;
+const ALERT_EMAIL_ENABLED = isTruthy(process.env.ALERT_EMAIL_ENABLED);
+const ALERT_EMAIL_REQUIRED = isTruthy(process.env.ALERT_EMAIL_REQUIRED);
+const ALERT_EMAIL_TO = optionalText(process.env.ALERT_EMAIL_TO) || 'contabilidad@engeikos.com.co';
+const ALERT_EMAIL_FROM = optionalText(process.env.ALERT_EMAIL_FROM);
+const ALERT_EMAIL_SUBJECT_PREFIX = optionalText(process.env.ALERT_EMAIL_SUBJECT_PREFIX) || '[Caja menor]';
+const SMTP_HOST = optionalText(process.env.SMTP_HOST);
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_SECURE = isTruthy(process.env.SMTP_SECURE);
+const SMTP_USER = optionalText(process.env.SMTP_USER);
+const SMTP_PASS = optionalText(process.env.SMTP_PASS);
 
 const TEMPLATE_PATH = resolveTemplatePath();
 
@@ -31,11 +45,13 @@ const MAX_GASTOS = 18;
 
 ensureDir(DATA_DIR);
 ensureDir(LEGALIZACIONES_DIR);
+ensureDir(CONSOLIDADO_DIR);
 
 const oneDriveTokenCache = {
   accessToken: '',
   expiresAtEpochMs: 0,
 };
+let mailTransporter = null;
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -64,12 +80,22 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         templateExists: fs.existsSync(TEMPLATE_PATH),
         templatePath: TEMPLATE_PATH,
+        consolidado: {
+          path: CONSOLIDADO_FILE,
+          exists: fs.existsSync(CONSOLIDADO_FILE),
+        },
         oneDrive: {
           enabled: ONEDRIVE_ENABLED,
           required: ONEDRIVE_REQUIRED,
           ready: oneDriveConfigIsReady(),
           driveIdConfigured: Boolean(ONEDRIVE_DRIVE_ID),
           basePath: ONEDRIVE_BASE_PATH,
+        },
+        alertEmail: {
+          enabled: ALERT_EMAIL_ENABLED,
+          required: ALERT_EMAIL_REQUIRED,
+          ready: emailConfigIsReady(),
+          recipientsConfigured: parseRecipientList(ALERT_EMAIL_TO).length,
         },
       });
     }
@@ -99,10 +125,16 @@ if (require.main === module) {
     console.log(`Ruta operativa: http://localhost:${PORT}/legalizacion-caja-menor`);
     console.log(`Data dir: ${DATA_DIR}`);
     console.log(`Plantilla XLSX: ${TEMPLATE_PATH}`);
+    console.log(`Consolidado XLSX: ${CONSOLIDADO_FILE}`);
     console.log(`OneDrive enabled: ${ONEDRIVE_ENABLED}`);
     if (ONEDRIVE_ENABLED) {
       console.log(`OneDrive ready: ${oneDriveConfigIsReady()}`);
       console.log(`OneDrive base path: ${ONEDRIVE_BASE_PATH}`);
+    }
+    console.log(`Alert email enabled: ${ALERT_EMAIL_ENABLED}`);
+    if (ALERT_EMAIL_ENABLED) {
+      console.log(`Alert email ready: ${emailConfigIsReady()}`);
+      console.log(`Alert recipients: ${parseRecipientList(ALERT_EMAIL_TO).join(', ')}`);
     }
   });
 }
@@ -192,6 +224,13 @@ async function processLegalizacion(data) {
       filesUploaded: 0,
       error: null,
     },
+    alertEmail: {
+      enabled: ALERT_EMAIL_ENABLED,
+      required: ALERT_EMAIL_REQUIRED,
+      sent: false,
+      recipients: parseRecipientList(ALERT_EMAIL_TO),
+      error: null,
+    },
     soportes: manifest,
     creadoEn: new Date().toISOString(),
   };
@@ -211,6 +250,20 @@ async function processLegalizacion(data) {
       metadata.oneDrive.error = error.message || 'No se pudo sincronizar con OneDrive';
       if (ONEDRIVE_REQUIRED) {
         throw new Error(`Legalización guardada localmente, pero falló OneDrive: ${metadata.oneDrive.error}`);
+      }
+    }
+  }
+
+  appendConsolidadoRows(buildConsolidadoRows({ data, metadata }));
+
+  if (ALERT_EMAIL_ENABLED) {
+    try {
+      await sendLegalizacionAlertEmail({ data, metadata });
+      metadata.alertEmail.sent = true;
+    } catch (error) {
+      metadata.alertEmail.error = error.message || 'No se pudo enviar alerta por correo';
+      if (ALERT_EMAIL_REQUIRED) {
+        throw new Error(`Legalización guardada, pero falló el correo de alerta: ${metadata.alertEmail.error}`);
       }
     }
   }
@@ -606,6 +659,127 @@ function encodeGraphPath(pathValue) {
 function isTruthy(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function parseRecipientList(input) {
+  return String(input || '')
+    .split(',')
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
+function emailConfigIsReady() {
+  const recipients = parseRecipientList(ALERT_EMAIL_TO);
+  return Boolean(SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && ALERT_EMAIL_FROM && recipients.length);
+}
+
+function getMailTransporter() {
+  if (mailTransporter) return mailTransporter;
+
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS,
+    },
+  });
+
+  return mailTransporter;
+}
+
+function appendConsolidadoRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  let workbook;
+  let sheet;
+
+  if (fs.existsSync(CONSOLIDADO_FILE)) {
+    workbook = XLSX.readFile(CONSOLIDADO_FILE);
+    sheet = workbook.Sheets.Consolidado || workbook.Sheets[workbook.SheetNames[0]];
+  } else {
+    workbook = XLSX.utils.book_new();
+    sheet = XLSX.utils.json_to_sheet([], { skipHeader: false });
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Consolidado');
+  }
+
+  XLSX.utils.sheet_add_json(sheet, rows, { origin: -1, skipHeader: fs.existsSync(CONSOLIDADO_FILE) });
+  workbook.Sheets.Consolidado = sheet;
+  if (!workbook.SheetNames.includes('Consolidado')) {
+    workbook.SheetNames.push('Consolidado');
+  }
+  XLSX.writeFile(workbook, CONSOLIDADO_FILE);
+}
+
+function buildConsolidadoRows({ data, metadata }) {
+  const createdAt = metadata.creadoEn || new Date().toISOString();
+  const oneDriveStatus = metadata.oneDrive?.enabled
+    ? (metadata.oneDrive?.synced ? 'SINCRONIZADO' : `ERROR: ${metadata.oneDrive?.error || 'NO SINCRONIZADO'}`)
+    : 'NO HABILITADO';
+
+  return data.gastos.map((gasto, index) => ({
+    FechaEnvio: createdAt,
+    Radicado: metadata.radicado,
+    CajaMenor: metadata.cabecera.cajaMenorNumero,
+    ConductorCedula: metadata.conductor.cedula,
+    ConductorNombre: metadata.conductor.nombre,
+    GastoConsecutivo: index + 1,
+    Valor: gasto.valor,
+    NITTercero: gasto.nitTercero,
+    NombreTercero: gasto.nombreTercero,
+    Detalle: gasto.detalle,
+    Placa: gasto.placa,
+    FechaGasto: gasto.fechaGasto,
+    SoportesEnGasto: gasto.soportes.length,
+    TotalGastosEnLegalizacion: data.gastos.length,
+    TotalValorLegalizacion: metadata.totalValor,
+    OneDriveStatus: oneDriveStatus,
+    OneDriveRuta: metadata.oneDrive?.remoteFolder || '',
+  }));
+}
+
+async function sendLegalizacionAlertEmail({ data, metadata }) {
+  if (!emailConfigIsReady()) {
+    throw new Error('Correo no está listo. Faltan SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / ALERT_EMAIL_FROM / ALERT_EMAIL_TO');
+  }
+
+  const recipients = parseRecipientList(ALERT_EMAIL_TO);
+  const subject = `${ALERT_EMAIL_SUBJECT_PREFIX} Nueva legalización ${metadata.radicado}`;
+
+  const oneDriveStatus = metadata.oneDrive?.enabled
+    ? (metadata.oneDrive?.synced
+      ? `Sincronizado (${metadata.oneDrive.filesUploaded || 0} archivos)`
+      : `Error: ${metadata.oneDrive.error || 'No detallado'}`)
+    : 'No habilitado';
+
+  const textBody = [
+    'Se recibió una nueva legalización de caja menor.',
+    '',
+    `Radicado: ${metadata.radicado}`,
+    `Caja menor #: ${metadata.cabecera.cajaMenorNumero}`,
+    `Conductor: ${metadata.conductor.nombre} (${metadata.conductor.cedula})`,
+    `Fecha cabecera: ${metadata.cabecera.fecha}`,
+    `Periodo: ${metadata.cabecera.desde} a ${metadata.cabecera.hasta}`,
+    `Gastos: ${data.gastos.length}`,
+    `Soportes: ${metadata.cantidadSoportes}`,
+    `Valor total: ${metadata.totalValor}`,
+    `OneDrive: ${oneDriveStatus}`,
+    metadata.oneDrive?.remoteFolder ? `Ruta OneDrive: ${metadata.oneDrive.remoteFolder}` : '',
+    '',
+    'El consolidado se actualizó en:',
+    CONSOLIDADO_FILE,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const transporter = getMailTransporter();
+  await transporter.sendMail({
+    from: ALERT_EMAIL_FROM,
+    to: recipients.join(', '),
+    subject,
+    text: textBody,
+  });
 }
 
 async function syncLocalFolderToOneDrive(localFolder, remoteFolder) {

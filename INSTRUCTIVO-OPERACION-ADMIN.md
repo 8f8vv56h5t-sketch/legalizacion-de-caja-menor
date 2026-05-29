@@ -30,6 +30,10 @@ Base de almacenamiento:
 En Render (producción):
 - `/data/legalizaciones/`
 
+Consolidado general:
+- Local: `/Users/carpetapersonal/Documents/Codex/2026-05-29/quiero-que-en-base-a-una/app/data/consolidado/CONSOLIDADO_LEGALIZACIONES.xlsx`
+- Render: `/data/consolidado/CONSOLIDADO_LEGALIZACIONES.xlsx`
+
 ## 3.1) Guardado automático en OneDrive (opcional/recomendado)
 Configurar variables en Render -> `Environment`:
 - `ONEDRIVE_ENABLED=true`
@@ -52,6 +56,24 @@ Dentro de cada radicado:
 - `soportes/linea-XX/` (archivos cargados)
 - `LEGALIZACION_<radicado>.xlsx` (formato diligenciado)
 - `metadata.json` (resumen y trazabilidad)
+
+## 3.2) Alerta automática a correo contabilidad
+Configurar variables en Render -> `Environment`:
+- `ALERT_EMAIL_ENABLED=true`
+- `ALERT_EMAIL_REQUIRED=false`
+- `ALERT_EMAIL_TO=contabilidad@engeikos.com.co`
+- `ALERT_EMAIL_FROM=<correo-remitente>`
+- `ALERT_EMAIL_SUBJECT_PREFIX=[Caja menor]`
+- `SMTP_HOST=smtp.office365.com`
+- `SMTP_PORT=587`
+- `SMTP_SECURE=false`
+- `SMTP_USER=<usuario-smtp>`
+- `SMTP_PASS=<clave-o-app-password>`
+
+Después:
+1. Guardar variables.
+2. Hacer deploy/redeploy.
+3. Verificar en `/health` que `alertEmail.ready` sea `true`.
 
 ## 4) Regla de exactitud por conductor
 - La cédula es obligatoria y la carpeta se crea con esa cédula como identificador principal.

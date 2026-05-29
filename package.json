@@ -1,0 +1,15 @@
+{
+  "name": "legalizacion-caja-menor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Formulario web para legalizacion de caja menor con consolidado y alertas por correo",
+  "main": "app/server.js",
+  "scripts": {
+    "start": "node app/server.js",
+    "check": "node --check app/server.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.10.1",
+    "xlsx": "^0.18.5"
+  }
+}

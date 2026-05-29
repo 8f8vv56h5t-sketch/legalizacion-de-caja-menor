@@ -17,6 +17,20 @@ services:
         value: "false"
       - key: ONEDRIVE_BASE_PATH
         value: LegalizacionesCajaMenor
+      - key: ALERT_EMAIL_ENABLED
+        value: "true"
+      - key: ALERT_EMAIL_REQUIRED
+        value: "false"
+      - key: ALERT_EMAIL_TO
+        value: contabilidad@engeikos.com.co
+      - key: ALERT_EMAIL_SUBJECT_PREFIX
+        value: "[Caja menor]"
+      - key: SMTP_HOST
+        value: smtp.office365.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
     disk:
       name: legalizaciones-data
       mountPath: /data
