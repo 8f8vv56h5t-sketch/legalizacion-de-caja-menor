@@ -79,7 +79,19 @@ async function onSubmit() {
       `Soportes guardados: ${result.result.cantidadSoportes}`,
     ].join('\n');
 
-    showOk(msg);
+    let oneDriveMsg = '';
+    const oneDrive = result.result.oneDrive;
+    if (oneDrive?.enabled && oneDrive?.synced) {
+      oneDriveMsg = `\nOneDrive: sincronizado (${oneDrive.filesUploaded} archivos)\nRuta OneDrive: ${oneDrive.remoteFolder}`;
+    } else if (oneDrive?.enabled && oneDrive?.error) {
+      oneDriveMsg = `\nOneDrive: error (${oneDrive.error})`;
+    } else if (oneDrive?.enabled) {
+      oneDriveMsg = '\nOneDrive: habilitado, sin sincronización reportada';
+    } else {
+      oneDriveMsg = '\nOneDrive: no habilitado';
+    }
+
+    showOk(`${msg}${oneDriveMsg}`);
     await setCajaMenorDefault();
   } catch (error) {
     showError(error.message || 'Error al enviar legalización');

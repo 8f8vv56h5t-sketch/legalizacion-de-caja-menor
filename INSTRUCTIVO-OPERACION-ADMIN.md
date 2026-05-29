@@ -30,6 +30,21 @@ Base de almacenamiento:
 En Render (producción):
 - `/data/legalizaciones/`
 
+## 3.1) Guardado automático en OneDrive (opcional/recomendado)
+Configurar variables en Render -> `Environment`:
+- `ONEDRIVE_ENABLED=true`
+- `ONEDRIVE_REQUIRED=false`
+- `ONEDRIVE_TENANT_ID=<tenant-id>`
+- `ONEDRIVE_CLIENT_ID=<app-client-id>`
+- `ONEDRIVE_CLIENT_SECRET=<client-secret>`
+- `ONEDRIVE_DRIVE_ID=<drive-id-destino>`
+- `ONEDRIVE_BASE_PATH=LegalizacionesCajaMenor`
+
+Después:
+1. Guardar variables.
+2. Hacer deploy/redeploy.
+3. Verificar en `/health` que `oneDrive.ready` sea `true`.
+
 Estructura:
 - `<cedula_nombre>/<anio>/<mes>/<radicado>/`
 

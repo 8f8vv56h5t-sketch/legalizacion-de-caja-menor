@@ -15,6 +15,14 @@ const PUBLIC_DIR = path.join(ROOT_DIR, 'app', 'public');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT_DIR, 'app', 'data');
 const LEGALIZACIONES_DIR = path.join(DATA_DIR, 'legalizaciones');
 const COUNTER_FILE = path.join(DATA_DIR, 'caja-menor-counter.json');
+const ONEDRIVE_ENABLED = isTruthy(process.env.ONEDRIVE_ENABLED);
+const ONEDRIVE_REQUIRED = isTruthy(process.env.ONEDRIVE_REQUIRED);
+const ONEDRIVE_TENANT_ID = optionalText(process.env.ONEDRIVE_TENANT_ID);
+const ONEDRIVE_CLIENT_ID = optionalText(process.env.ONEDRIVE_CLIENT_ID);
+const ONEDRIVE_CLIENT_SECRET = optionalText(process.env.ONEDRIVE_CLIENT_SECRET);
+const ONEDRIVE_DRIVE_ID = optionalText(process.env.ONEDRIVE_DRIVE_ID);
+const ONEDRIVE_BASE_PATH = optionalText(process.env.ONEDRIVE_BASE_PATH) || 'LegalizacionesCajaMenor';
+const ONEDRIVE_MAX_INLINE_MB = 250;
 
 const TEMPLATE_PATH = resolveTemplatePath();
 
@@ -23,6 +31,11 @@ const MAX_GASTOS = 18;
 
 ensureDir(DATA_DIR);
 ensureDir(LEGALIZACIONES_DIR);
+
+const oneDriveTokenCache = {
+  accessToken: '',
+  expiresAtEpochMs: 0,
+};
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -51,6 +64,13 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         templateExists: fs.existsSync(TEMPLATE_PATH),
         templatePath: TEMPLATE_PATH,
+        oneDrive: {
+          enabled: ONEDRIVE_ENABLED,
+          required: ONEDRIVE_REQUIRED,
+          ready: oneDriveConfigIsReady(),
+          driveIdConfigured: Boolean(ONEDRIVE_DRIVE_ID),
+          basePath: ONEDRIVE_BASE_PATH,
+        },
       });
     }
 
@@ -62,7 +82,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/legalizaciones') {
       const payload = await readJsonBody(req, MAX_REQUEST_SIZE);
       const validated = validatePayload(payload);
-      const result = processLegalizacion(validated);
+      const result = await processLegalizacion(validated);
       return json(res, 201, { ok: true, result });
     }
 
@@ -79,10 +99,15 @@ if (require.main === module) {
     console.log(`Ruta operativa: http://localhost:${PORT}/legalizacion-caja-menor`);
     console.log(`Data dir: ${DATA_DIR}`);
     console.log(`Plantilla XLSX: ${TEMPLATE_PATH}`);
+    console.log(`OneDrive enabled: ${ONEDRIVE_ENABLED}`);
+    if (ONEDRIVE_ENABLED) {
+      console.log(`OneDrive ready: ${oneDriveConfigIsReady()}`);
+      console.log(`OneDrive base path: ${ONEDRIVE_BASE_PATH}`);
+    }
   });
 }
 
-function processLegalizacion(data) {
+async function processLegalizacion(data) {
   if (!fs.existsSync(TEMPLATE_PATH)) {
     throw new Error(`No se encuentra la plantilla en: ${TEMPLATE_PATH}`);
   }
@@ -159,11 +184,38 @@ function processLegalizacion(data) {
       soportesFolder,
       archivoExcel: xlsxOutput,
     },
+    oneDrive: {
+      enabled: ONEDRIVE_ENABLED,
+      required: ONEDRIVE_REQUIRED,
+      synced: false,
+      remoteFolder: null,
+      filesUploaded: 0,
+      error: null,
+    },
     soportes: manifest,
     creadoEn: new Date().toISOString(),
   };
 
-  fs.writeFileSync(path.join(baseFolder, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
+  const metadataPath = path.join(baseFolder, 'metadata.json');
+  fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
+
+  if (ONEDRIVE_ENABLED) {
+    try {
+      const remoteFolder = oneDriveJoinPath(ONEDRIVE_BASE_PATH, conductorKey, year, month, radicado);
+      const uploadResult = await syncLocalFolderToOneDrive(baseFolder, remoteFolder);
+      metadata.oneDrive.synced = true;
+      metadata.oneDrive.remoteFolder = remoteFolder;
+      metadata.oneDrive.filesUploaded = uploadResult.filesUploaded;
+      metadata.oneDrive.uploadedFiles = uploadResult.uploadedFiles;
+    } catch (error) {
+      metadata.oneDrive.error = error.message || 'No se pudo sincronizar con OneDrive';
+      if (ONEDRIVE_REQUIRED) {
+        throw new Error(`Legalización guardada localmente, pero falló OneDrive: ${metadata.oneDrive.error}`);
+      }
+    }
+  }
+
+  fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf8');
 
   return metadata;
 }
@@ -530,6 +582,203 @@ function generateCajaMenorNumero() {
   state[key] = next;
   writeCounterState(state);
   return `CM-${key}-${String(next).padStart(4, '0')}`;
+}
+
+function oneDriveConfigIsReady() {
+  return Boolean(ONEDRIVE_TENANT_ID && ONEDRIVE_CLIENT_ID && ONEDRIVE_CLIENT_SECRET && ONEDRIVE_DRIVE_ID);
+}
+
+function oneDriveJoinPath(...parts) {
+  return parts
+    .map((part) => String(part || '').replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+    .join('/');
+}
+
+function encodeGraphPath(pathValue) {
+  return String(pathValue)
+    .split('/')
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
+function isTruthy(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+async function syncLocalFolderToOneDrive(localFolder, remoteFolder) {
+  if (!oneDriveConfigIsReady()) {
+    throw new Error('OneDrive no está listo. Faltan ONEDRIVE_TENANT_ID / ONEDRIVE_CLIENT_ID / ONEDRIVE_CLIENT_SECRET / ONEDRIVE_DRIVE_ID');
+  }
+
+  await ensureOneDriveFolderRecursive(remoteFolder);
+
+  const files = listFilesRecursive(localFolder);
+  const uploadedFiles = [];
+
+  for (const filePath of files) {
+    const relativePath = path.relative(localFolder, filePath).split(path.sep).join('/');
+    const remoteFilePath = oneDriveJoinPath(remoteFolder, relativePath);
+    const buffer = fs.readFileSync(filePath);
+
+    const sizeMb = buffer.length / (1024 * 1024);
+    if (sizeMb > ONEDRIVE_MAX_INLINE_MB) {
+      throw new Error(`Archivo demasiado grande para carga simple OneDrive (${relativePath}, ${sizeMb.toFixed(2)} MB)`);
+    }
+
+    await putOneDriveFile(remoteFilePath, buffer);
+    uploadedFiles.push({
+      localPath: filePath,
+      remotePath: remoteFilePath,
+      bytes: buffer.length,
+    });
+  }
+
+  return {
+    filesUploaded: uploadedFiles.length,
+    uploadedFiles,
+  };
+}
+
+function listFilesRecursive(startDir) {
+  const out = [];
+  const stack = [startDir];
+
+  while (stack.length) {
+    const current = stack.pop();
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile()) {
+        out.push(full);
+      }
+    }
+  }
+
+  return out.sort();
+}
+
+async function getOneDriveAccessToken() {
+  const now = Date.now();
+  if (oneDriveTokenCache.accessToken && oneDriveTokenCache.expiresAtEpochMs - 60_000 > now) {
+    return oneDriveTokenCache.accessToken;
+  }
+
+  const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(ONEDRIVE_TENANT_ID)}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({
+    client_id: ONEDRIVE_CLIENT_ID,
+    client_secret: ONEDRIVE_CLIENT_SECRET,
+    grant_type: 'client_credentials',
+    scope: 'https://graph.microsoft.com/.default',
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  const raw = await response.text();
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    payload = { raw };
+  }
+
+  if (!response.ok || !payload.access_token) {
+    throw new Error(`No se pudo obtener token OneDrive (${response.status}): ${payload.error_description || payload.error || raw}`);
+  }
+
+  const expiresIn = Number(payload.expires_in || 3600);
+  oneDriveTokenCache.accessToken = payload.access_token;
+  oneDriveTokenCache.expiresAtEpochMs = now + expiresIn * 1000;
+  return payload.access_token;
+}
+
+async function callGraph(method, endpoint, { headers = {}, body, expectedStatus } = {}) {
+  const token = await getOneDriveAccessToken();
+  const url = `https://graph.microsoft.com/v1.0${endpoint}`;
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...headers,
+    },
+    body,
+  });
+
+  if (!expectedStatus) {
+    return response;
+  }
+
+  const okStatuses = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+  if (okStatuses.includes(response.status)) {
+    return response;
+  }
+
+  const text = await response.text();
+  throw new Error(`Graph ${method} ${endpoint} -> ${response.status}: ${text}`);
+}
+
+async function getOneDriveItemByPath(remotePath) {
+  const encoded = encodeGraphPath(remotePath);
+  const response = await callGraph('GET', `/drives/${encodeURIComponent(ONEDRIVE_DRIVE_ID)}/root:/${encoded}`);
+
+  if (response.status === 200) {
+    return response.json();
+  }
+  if (response.status === 404) {
+    return null;
+  }
+
+  const text = await response.text();
+  throw new Error(`No se pudo consultar ruta OneDrive ${remotePath}: ${response.status} ${text}`);
+}
+
+async function ensureOneDriveFolderRecursive(remotePath) {
+  const segments = String(remotePath || '').split('/').filter(Boolean);
+  let currentPath = '';
+
+  for (const segment of segments) {
+    currentPath = oneDriveJoinPath(currentPath, segment);
+    const found = await getOneDriveItemByPath(currentPath);
+    if (found) continue;
+
+    const parent = oneDriveJoinPath(...currentPath.split('/').slice(0, -1));
+    const endpoint = parent
+      ? `/drives/${encodeURIComponent(ONEDRIVE_DRIVE_ID)}/root:/${encodeGraphPath(parent)}:/children`
+      : `/drives/${encodeURIComponent(ONEDRIVE_DRIVE_ID)}/root/children`;
+
+    await callGraph('POST', endpoint, {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: segment,
+        folder: {},
+        '@microsoft.graph.conflictBehavior': 'replace',
+      }),
+      expectedStatus: [200, 201],
+    });
+  }
+}
+
+async function putOneDriveFile(remoteFilePath, buffer) {
+  const parentPath = oneDriveJoinPath(...String(remoteFilePath).split('/').slice(0, -1));
+  if (parentPath) {
+    await ensureOneDriveFolderRecursive(parentPath);
+  }
+
+  const encoded = encodeGraphPath(remoteFilePath);
+  await callGraph('PUT', `/drives/${encodeURIComponent(ONEDRIVE_DRIVE_ID)}/root:/${encoded}:/content`, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: buffer,
+    expectedStatus: [200, 201],
+  });
 }
 
 module.exports = {

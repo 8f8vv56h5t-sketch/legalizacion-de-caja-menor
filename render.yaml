@@ -11,6 +11,12 @@ services:
         value: production
       - key: DATA_DIR
         value: /data
+      - key: ONEDRIVE_ENABLED
+        value: "false"
+      - key: ONEDRIVE_REQUIRED
+        value: "false"
+      - key: ONEDRIVE_BASE_PATH
+        value: LegalizacionesCajaMenor
     disk:
       name: legalizaciones-data
       mountPath: /data
