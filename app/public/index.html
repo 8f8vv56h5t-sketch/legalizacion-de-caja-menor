@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Legalización Caja Menor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <div class="brand">
+          <img class="brand-logo" src="assets/logo-engeikos.jpg" alt="Logo Engeikos" />
+          <div>
+            <h1>Legalización de Caja Menor</h1>
+            <p>Diligencia el formato y adjunta soportes por cada gasto.</p>
+          </div>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>Datos del Conductor</h2>
+        <div class="grid two">
+          <label>
+            Cédula (obligatoria)
+            <input id="conductorCedula" type="text" placeholder="Ej: 123456789" required />
+          </label>
+          <label>
+            Nombre conductor
+            <input id="conductorNombre" type="text" placeholder="Ej: Juan Perez" required />
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Cabecera Legalización</h2>
+        <div class="grid two">
+          <label>
+            Caja menor # (autogenerado)
+            <input id="cajaMenorNumero" type="text" readonly />
+          </label>
+          <label>
+            Fecha
+            <input id="fechaCabecera" type="date" required />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>
+            Desde
+            <input id="desde" type="date" required />
+          </label>
+          <label>
+            Hasta
+            <input id="hasta" type="date" required />
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="row-between">
+          <h2>Detalle de Gastos</h2>
+          <button id="addRow" type="button">Agregar gasto</button>
+        </div>
+        <p class="hint">Máximo 18 líneas por plantilla.</p>
+        <div id="rows"></div>
+      </section>
+
+      <section class="card">
+        <button id="submitBtn" class="primary" type="button">Enviar legalización</button>
+        <div id="status" class="status"></div>
+      </section>
+    </main>
+
+    <template id="rowTemplate">
+      <article class="gasto-row">
+        <div class="row-between">
+          <h3>Gasto <span data-field="lineNo"></span></h3>
+          <button type="button" data-action="remove">Quitar</button>
+        </div>
+        <div class="grid three">
+          <label>Consecutivo<input data-field="consecutivo" type="text" readonly /></label>
+          <label>Valor<input data-field="valor" type="number" min="1" step="0.01" required /></label>
+          <label>NIT del tercero<input data-field="nitTercero" type="text" required /></label>
+        </div>
+        <div class="grid two">
+          <label>Nombre tercero<input data-field="nombreTercero" type="text" required /></label>
+        </div>
+        <div class="grid two">
+          <label>Detalle<input data-field="detalle" type="text" required /></label>
+          <label>Vehículo (placa)<input data-field="placa" type="text" required /></label>
+        </div>
+        <div class="grid two">
+          <label>Fecha gasto<input data-field="fechaGasto" type="date" required /></label>
+          <label>Soportes<input data-field="soportes" type="file" multiple required /></label>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

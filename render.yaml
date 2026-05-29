@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: legalizacion-caja-menor
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+    disk:
+      name: legalizaciones-data
+      mountPath: /data
+      sizeGB: 10

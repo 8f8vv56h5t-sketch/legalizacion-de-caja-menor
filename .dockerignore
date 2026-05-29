@@ -1,0 +1,5 @@
+.git
+.gitignore
+app/data/legalizaciones
+app/data/*.json
+tmp_xlsx
