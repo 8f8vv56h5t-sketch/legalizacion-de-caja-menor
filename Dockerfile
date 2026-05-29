@@ -2,6 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache zip unzip
+
 COPY app ./app
 
 ENV NODE_ENV=production
