@@ -12,9 +12,17 @@ services:
       - key: DATA_DIR
         value: /data
       - key: ONEDRIVE_ENABLED
-        value: "false"
+        sync: false
       - key: ONEDRIVE_REQUIRED
-        value: "false"
+        sync: false
+      - key: ONEDRIVE_TENANT_ID
+        sync: false
+      - key: ONEDRIVE_CLIENT_ID
+        sync: false
+      - key: ONEDRIVE_CLIENT_SECRET
+        sync: false
+      - key: ONEDRIVE_DRIVE_ID
+        sync: false
       - key: ONEDRIVE_BASE_PATH
         value: LegalizacionesCajaMenor
       - key: ALERT_EMAIL_ENABLED
@@ -23,6 +31,8 @@ services:
         value: "false"
       - key: ALERT_EMAIL_TO
         value: contabilidad@engeikos.com.co
+      - key: ALERT_EMAIL_FROM
+        sync: false
       - key: ALERT_EMAIL_SUBJECT_PREFIX
         value: "[Caja menor]"
       - key: SMTP_HOST
@@ -31,6 +41,10 @@ services:
         value: "587"
       - key: SMTP_SECURE
         value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
     disk:
       name: legalizaciones-data
       mountPath: /data
